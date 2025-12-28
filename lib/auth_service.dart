@@ -3,10 +3,16 @@ import 'dart:io';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 
 class AuthService {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  final SupabaseClient _supabase;
+
+  /// Accept an optional `SupabaseClient` for easier testing; defaults to
+  /// `Supabase.instance.client` when not provided.
+  AuthService([SupabaseClient? client])
+    : _supabase = client ?? Supabase.instance.client;
 
   // --- SIGN UP ---
   Future<AuthResponse> signUp(
@@ -143,6 +149,12 @@ class AuthService {
       print(
         '[AuthService] Facebook access token present; userId=${accessToken.userId}, expires=${accessToken.expires}',
       );
+      if (kDebugMode) {
+        // Temporary debug: print token locally (do not commit this in production)
+        print(
+          '[AuthService][DEBUG] Facebook access token: ${accessToken.token}',
+        );
+      }
 
       // Diagnostics: call Graph API /me and try debug_token (if app secret provided via env)
       await _diagnoseFacebookToken(accessToken);

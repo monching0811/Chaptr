@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "470224077412",
+    "project_id": "chaptr-ebook-app",
+    "storage_bucket": "chaptr-ebook-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:470224077412:android:f647ac84d1bc376530d571",
+        "android_client_info": {
+          "package_name": "com.example.chaptr_ebook_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "470224077412-dk2dgbckigt2ibu38hnjjbdngndf5v57.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.chaptr_ebook_app",
+            "certificate_hash": "cf6288c45eabce637f1484dd9a6accf30b2feeb7"
+          }
+        },
+        {
+          "client_id": "470224077412-ksm0uvafeqljtoppb4puseqrmtl7866a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJr_5tWexSbFX-C1L0VFiNRVIHEimKrbI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "470224077412-ksm0uvafeqljtoppb4puseqrmtl7866a.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

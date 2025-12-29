@@ -1,10 +1,6 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 
 class AuthService {
   final SupabaseClient _supabase;
@@ -119,127 +115,13 @@ class AuthService {
   }
 
   // --- SIGN IN WITH FACEBOOK ---
-  Future<AuthResponse> signInWithFacebook() async {
+  Future<void> signInWithFacebook() async {
     try {
-      // First try using Supabase's OAuth flow (preferred). This initiates a redirect and may not immediately return a session.
-      try {
-        final started = await _supabase.auth.signInWithOAuth(
-          OAuthProvider.facebook,
-        );
-        print('[AuthService] signInWithOAuth started: $started');
-        if (started == true) {
-          // The SDK initiated a redirect-based flow. The session will be available after the redirect completes.
-          throw 'Supabase OAuth flow started (redirect to browser). Complete the flow and re-check session via Supabase listeners; this method cannot complete a session immediately.';
-        }
-      } catch (e) {
-        // Method might not be available (older SDK) or the call failed; fall through to SDK-based flow
-        print('[AuthService] signInWithOAuth not available or failed: $e');
-      }
-
-      // Fall back to using the Facebook SDK token exchange
-      final LoginResult result = await FacebookAuth.instance.login();
-      print(
-        '[AuthService] Facebook login result: status=${result.status}, message=${result.message}',
-      );
-      if (result.status != LoginStatus.success)
-        throw 'Facebook sign in failed: ${result.message}';
-
-      final AccessToken? accessToken = result.accessToken;
-      if (accessToken == null) throw 'Failed to get Facebook access token';
-      print(
-        '[AuthService] Facebook access token present; userId=${accessToken.userId}, expires=${accessToken.expires}',
-      );
-      if (kDebugMode) {
-        // Temporary debug: print token locally (do not commit this in production)
-        print(
-          '[AuthService][DEBUG] Facebook access token: ${accessToken.token}',
-        );
-      }
-
-      // Diagnostics: call Graph API /me and try debug_token (if app secret provided via env)
-      await _diagnoseFacebookToken(accessToken);
-
-      try {
-        final res = await _supabase.auth.signInWithIdToken(
-          provider: OAuthProvider.facebook,
-          idToken: accessToken.token,
-        );
-        print(
-          '[AuthService] Supabase signInWithIdToken result: ${res.session?.user.email ?? res.user?.email ?? 'no user'}, sessionPresent=${res.session != null}',
-        );
-        return res;
-      } catch (e) {
-        print('[AuthService] signInWithIdToken failed: $e');
-        // Try passing the token as accessToken as well (some providers expect it)
-        try {
-          final res2 = await _supabase.auth.signInWithIdToken(
-            provider: OAuthProvider.facebook,
-            idToken: accessToken.token,
-            accessToken: accessToken.token,
-          );
-          print(
-            '[AuthService] Supabase signInWithIdToken (with accessToken) result: ${res2.session?.user.email ?? res2.user?.email ?? 'no user'}, sessionPresent=${res2.session != null}',
-          );
-          return res2;
-        } catch (e2) {
-          print(
-            '[AuthService] signInWithIdToken (with accessToken) also failed: $e2',
-          );
-          // Provide a helpful error explaining likely cause
-          throw 'Facebook sign-in failed: Supabase rejected the Facebook token. Ensure Facebook is enabled in Supabase Auth with correct App ID & Secret, or use the OAuth flow.';
-        }
-      }
+      await _supabase.auth.signInWithOAuth(OAuthProvider.facebook);
+      print('[AuthService] Facebook OAuth flow initiated');
     } catch (e, st) {
       print('[AuthService] signInWithFacebook error: $e\n$st');
       rethrow;
-    }
-  }
-
-  // --- HELPER: Diagnostics for Facebook tokens ---
-  Future<void> _diagnoseFacebookToken(AccessToken accessToken) async {
-    try {
-      // 1) /me response (basic verification)
-      try {
-        final uri = Uri.parse(
-          'https://graph.facebook.com/me?fields=id,name,email&access_token=${accessToken.token}',
-        );
-        final HttpClient httpClient = HttpClient();
-        final req = await httpClient.getUrl(uri);
-        final resp = await req.close();
-        final body = await resp.transform(utf8.decoder).join();
-        print(
-          '[AuthService] Facebook Graph /me response: ${resp.statusCode} $body',
-        );
-      } catch (e) {
-        print('[AuthService] Failed to call Facebook Graph /me: $e');
-      }
-
-      // 2) If app id & secret provided in environment, call /debug_token for richer diagnostics
-      final fbAppId = Platform.environment['FACEBOOK_APP_ID'];
-      final fbAppSecret = Platform.environment['FACEBOOK_APP_SECRET'];
-      if (fbAppId != null && fbAppSecret != null) {
-        try {
-          final appToken = '$fbAppId|$fbAppSecret';
-          final uriDebug = Uri.parse(
-            'https://graph.facebook.com/debug_token?input_token=${accessToken.token}&access_token=$appToken',
-          );
-          final httpClient2 = HttpClient();
-          final req2 = await httpClient2.getUrl(uriDebug);
-          final resp2 = await req2.close();
-          final body2 = await resp2.transform(utf8.decoder).join();
-          print(
-            '[AuthService] Facebook Graph /debug_token response: ${resp2.statusCode} $body2',
-          );
-        } catch (e) {
-          print('[AuthService] Failed to call Facebook Graph /debug_token: $e');
-        }
-      } else {
-        print(
-          '[AuthService] FACEBOOK_APP_ID/SECRET not set in environment; skipping /debug_token. To enable, set env vars FACEBOOK_APP_ID and FACEBOOK_APP_SECRET for diagnostics.',
-        );
-      }
-    } catch (e) {
-      print('[AuthService] _diagnoseFacebookToken unexpected error: $e');
     }
   }
 

@@ -28,5 +28,6 @@ To enable Facebook sign-in on mobile and complete the OAuth redirect flow:
 5. The app listens to `supabase.auth.onAuthStateChange` and will navigate the user to the main app screen after the session is established.
 
 Notes:
+
 - For diagnostics, call `https://graph.facebook.com/debug_token?input_token=<USER_TOKEN>&access_token=<APP_ID>|<APP_SECRET>` from a secure host to verify token validity.
 - Do not embed your Facebook app secret in the mobile app.

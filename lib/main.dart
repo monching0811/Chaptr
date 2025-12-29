@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import 'auth_page.dart'; // 1. Imported the new AuthPage
+import 'main_navigation.dart'; // navigation after auth
+import 'settings_provider.dart';
 
 // IMPORTANT: Replace these placeholders with your actual Supabase credentials!
 const String supabaseUrl = 'https://iwabeiwdypqiualdunnj.supabase.co';
@@ -16,63 +20,138 @@ Future<void> main() async {
     debug: true,
   );
 
-  runApp(const ChaptrApp());
+  runApp(
+    MultiProvider(
+      providers: [ChangeNotifierProvider(create: (_) => SettingsProvider())],
+      child: const ChaptrApp(),
+    ),
+  );
 }
 
 final supabase = Supabase.instance.client;
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-class ChaptrApp extends StatelessWidget {
+class ChaptrApp extends StatefulWidget {
   const ChaptrApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    const Color primaryYellow = Color(0xFFFFEB3B);
+  State<ChaptrApp> createState() => _ChaptrAppState();
+}
 
-    return MaterialApp(
-      title: 'Chaptr E-book App',
-      debugShowCheckedModeBanner: false, // Optional: hides the debug banner
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSwatch(
-          primarySwatch: Colors.yellow,
-          brightness: Brightness.light,
-        ),
-        primaryColor: primaryYellow,
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryYellow, // Making buttons match your brand
-            foregroundColor: Colors.black,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+class _ChaptrAppState extends State<ChaptrApp> {
+  late final StreamSubscription<AuthState> _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Listen for auth state changes so the app can react after OAuth redirect
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
+      ev,
+    ) async {
+      final session = ev.session;
+      print(
+        '[Main] auth state change: ${ev.event}, sessionPresent=${session != null}',
+      );
+
+      if (session != null) {
+        // Ensure a profile row exists for the signed-in user (handles OAuth providers)
+        final user = session.user;
+        if (user != null) {
+          try {
+            final existing = await supabase
+                .from('profiles')
+                .select()
+                .eq('id', user.id)
+                .maybeSingle();
+
+            if (existing == null) {
+              final username = user.email ?? (user.userMetadata?['name'] ?? '');
+              await supabase.from('profiles').insert({
+                'id': user.id,
+                'username': username,
+              });
+              print('[Main] Created profile for ${user.id}');
+            }
+          } catch (e) {
+            print('[Main] Error ensuring profile exists: $e');
+          }
+        }
+
+        // User signed in — navigate to main app
+        navigatorKey.currentState?.pushReplacement(
+          MaterialPageRoute(builder: (_) => const MainNavigation()),
+        );
+      } else {
+        // Signed out — return to auth page
+        navigatorKey.currentState?.pushReplacement(
+          MaterialPageRoute(builder: (_) => const AuthPage()),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, child) {
+        const Color primaryYellow = Color(0xFFFFEB3B);
+
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          title: 'Chaptr E-book App',
+          debugShowCheckedModeBanner: false, // Optional: hides the debug banner
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSwatch(
+              primarySwatch: Colors.yellow,
+              brightness: Brightness.light,
             ),
-          ),
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black,
-        colorScheme: const ColorScheme.dark(
-          primary: primaryYellow,
-          surface: Colors.black,
-        ),
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(color: Colors.white),
-          bodyMedium: TextStyle(color: Colors.white),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryYellow,
-            foregroundColor: Colors.black,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+            primaryColor: primaryYellow,
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    primaryYellow, // Making buttons match your brand
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
             ),
+            useMaterial3: true,
           ),
-        ),
-        useMaterial3: true,
-      ),
-      themeMode: ThemeMode.system,
-      // 2. Changed home from Placeholder to AuthPage
-      home: const AuthPage(),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: Colors.black,
+            colorScheme: const ColorScheme.dark(
+              primary: primaryYellow,
+              surface: Colors.black,
+            ),
+            textTheme: const TextTheme(
+              bodyLarge: TextStyle(color: Colors.white),
+              bodyMedium: TextStyle(color: Colors.white),
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryYellow,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            useMaterial3: true,
+          ),
+          themeMode: settings.themeMode,
+          // 2. Changed home from Placeholder to AuthPage
+          home: const AuthPage(),
+        );
+      },
     );
   }
 }

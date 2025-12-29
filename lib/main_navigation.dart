@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'add_book_screen.dart';
+import 'bookstore_screen.dart';
+import 'profile_screen.dart'; // ADDED
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -12,12 +14,12 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
-  // List of screens for the bottom nav
+  // Updated list of screens to include the ProfileScreen
   final List<Widget> _screens = [
-    const HomeScreen(), // Library Icon
-    const Center(child: Text("Bookstore Coming Soon")), // Bookstore Icon
-    const AddBookScreen(), // Write Icon
-    const Center(child: Text("Settings Coming Soon")), // Settings Icon
+    const HomeScreen(), // Library
+    const BookstoreScreen(), // Store
+    const AddBookScreen(), // Write
+    const ProfileScreen(), // Settings/Profile
   ];
 
   @override
@@ -27,9 +29,7 @@ class _MainNavigationState extends State<MainNavigation> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(
-          0xFFFFEB3B,
-        ), // Primary Yellow from Proposal
+        selectedItemColor: const Color(0xFFFFEB3B), // Primary Yellow
         unselectedItemColor: Colors.grey,
         onTap: (index) => setState(() => _selectedIndex = index),
         items: const [

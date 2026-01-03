@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:provider/provider.dart';
 import 'book_model.dart';
+import 'settings_provider.dart';
 
 class ReaderScreen extends StatefulWidget {
   final Book book;
@@ -19,14 +21,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Color _backgroundColor = Colors.white;
   Color _textColor = Colors.black87;
 
+  // Local overrides (if user modifies appearance in the reader UI)
+  bool _appearanceOverride =
+      false; // if true, local theme choice wins over global setting
+  bool _fontOverride =
+      false; // if true, local font size wins over global setting
+
   double _speechRate = 0.5;
   double _pitch = 1.0;
 
-  // Helper to get only the chapters that are marked as published
+  // Helper to get only the chapters that are marked as published, sorted by chapter_number
   List<Map<String, dynamic>> get _publishedChapters {
     return widget.book.chapters
         .where((ch) => ch['is_published'] == true)
-        .toList();
+        .toList()
+      ..sort(
+        (a, b) =>
+            (a['chapter_number'] ?? 0).compareTo(b['chapter_number'] ?? 0),
+      );
   }
 
   @override
@@ -37,6 +49,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   void _setTheme(String theme) {
     setState(() {
+      _appearanceOverride = true;
       if (theme == 'sepia') {
         _backgroundColor = const Color(0xFFF4ECD8);
         _textColor = const Color(0xFF5B4636);
@@ -104,7 +117,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
                           activeColor: const Color(0xFFFFEB3B),
                           onChanged: (val) {
                             setModalState(() => _fontSize = val);
-                            setState(() => _fontSize = val);
+                            setState(() {
+                              _fontSize = val;
+                              _fontOverride = true;
+                            });
                           },
                         ),
                       ),
@@ -233,8 +249,35 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsProvider>();
+
+    // Apply global reading settings unless the reader has locally overridden them
+    final effectiveFontSize = _fontOverride
+        ? _fontSize
+        : (18 * settings.fontSize);
+
+    // Determine background / text color from settings unless locally overridden
+    Color background = _backgroundColor;
+    Color textColor = _textColor;
+    if (!_appearanceOverride) {
+      switch (settings.readingBackground) {
+        case ReadingBackground.sepia:
+          background = const Color(0xFFF4ECD8);
+          textColor = const Color(0xFF5B4636);
+          break;
+        case ReadingBackground.black:
+          background = const Color(0xFF1A1A1A);
+          textColor = Colors.white70;
+          break;
+        case ReadingBackground.white:
+          background = Colors.white;
+          textColor = Colors.black87;
+          break;
+      }
+    }
+
     return Scaffold(
-      backgroundColor: _backgroundColor,
+      backgroundColor: background,
       appBar: AppBar(
         title: Text(widget.book.title),
         backgroundColor: const Color(0xFFFFEB3B),
@@ -262,9 +305,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             Text(
               widget.book.title,
               style: TextStyle(
-                fontSize: _fontSize + 8,
+                fontSize: effectiveFontSize + 8,
                 fontWeight: FontWeight.bold,
-                color: _textColor,
+                color: textColor,
               ),
             ),
             Text(
@@ -272,7 +315,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontStyle: FontStyle.italic,
-                color: _textColor.withOpacity(0.7),
+                color: textColor.withAlpha((0.7 * 255).round()),
               ),
             ),
             const Divider(height: 30),
@@ -280,6 +323,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             // --- FIXED: Iterate over published chapters only ---
             ..._publishedChapters.map((chapter) {
               int chNumber = chapter['chapter_number'] ?? 1;
+              String title = chapter['title'] ?? '';
               String content = chapter['content'] ?? '';
 
               return Padding(
@@ -288,21 +332,21 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Chapter $chNumber",
+                      title.isNotEmpty ? title : "Chapter $chNumber",
                       style: TextStyle(
-                        fontSize: _fontSize + 2,
+                        fontSize: effectiveFontSize + 2,
                         fontWeight: FontWeight.bold,
-                        color: _textColor.withOpacity(0.9),
+                        color: textColor.withAlpha((0.9 * 255).round()),
                       ),
                     ),
                     const SizedBox(height: 10),
                     Text(
                       content,
                       style: TextStyle(
-                        fontSize: _fontSize,
+                        fontSize: effectiveFontSize,
                         height: 1.7,
                         fontFamily: 'Serif',
-                        color: _textColor,
+                        color: textColor,
                       ),
                     ),
                   ],

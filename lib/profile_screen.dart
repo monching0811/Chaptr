@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'add_book_screen.dart';
 import 'animations.dart';
 import 'auth_page.dart';
@@ -10,6 +11,7 @@ import 'book_model.dart';
 import 'reader_screen.dart';
 import 'settings_provider.dart';
 import 'image_utils.dart';
+import 'widgets/book_flip_loading.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -23,8 +25,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   final _supabase = Supabase.instance.client;
   late TabController _tabController;
   int _profileRefreshKey = 0;
-  int _publishedRefreshKey = 0;
-  int _draftsRefreshKey = 0;
 
   @override
   void initState() {
@@ -117,10 +117,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           break;
         } on PostgrestException catch (e) {
           // If the column doesn't exist, Postgrest returns a message containing "Could not find the '...' column"
-          if (e.message != null && e.message!.contains("Could not find the")) {
-            // try the next candidate
-            continue;
-          }
+          if (e.message.contains("Could not find the")) {}
           rethrow;
         }
       }
@@ -291,7 +288,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Padding(
                   padding: EdgeInsets.all(20.0),
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(child: LogoLoading()),
                 );
               }
               final profile = snapshot.data;
@@ -337,7 +334,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                     Text(
                       user?.email ?? "User Email",
-                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
+                      ),
                     ),
                     const Divider(height: 30),
                   ],
@@ -369,6 +371,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   children: [
+                    const SizedBox(height: 10),
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
                       child: Text(
@@ -379,6 +382,60 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ),
                       ),
                     ),
+
+                    // --- Account & Profile ---
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                      child: Text(
+                        'Account & Profile',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    FutureBuilder<Map<String, dynamic>?>(
+                      future: _fetchProfile(),
+                      builder: (context, snapshot) {
+                        final profile = snapshot.data;
+                        final username = profile?['username'] ?? 'Unknown User';
+                        final email = _supabase.auth.currentUser?.email ?? '';
+                        return Column(
+                          children: [
+                            ListTile(
+                              title: Text(username),
+                              subtitle: Text(email),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.edit),
+                                onPressed: () async {
+                                  final p = await _fetchProfile();
+                                  _editProfile(p);
+                                },
+                              ),
+                            ),
+                            ListTile(
+                              title: const Text('Change Email'),
+                              subtitle: Text(email),
+                              onTap: () => _showChangeEmailDialog(),
+                            ),
+                            ListTile(
+                              title: const Text('Change Password'),
+                              subtitle: const Text('Update your password'),
+                              onTap: () => _showChangePasswordDialog(),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+
+                    const Divider(),
+
+                    // --- Application Preferences ---
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                      child: Text(
+                        'Application Preferences',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+
                     // Theme Mode
                     ListTile(
                       title: const Text("Theme Mode"),
@@ -406,55 +463,200 @@ class _ProfileScreenState extends State<ProfileScreen>
                           ),
                         ],
                         onChanged: (value) {
-                          if (value != null) {
-                            settings.setThemeMode(value);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Theme changed successfully"),
-                              ),
-                            );
-                          }
+                          if (value != null) settings.setThemeMode(value);
                         },
                       ),
                     ),
-                    // Font Size
+
+                    // Push Notifications (expanded)
+                    ExpansionTile(
+                      leading: const Icon(Icons.notifications),
+                      title: const Text('Push Notifications'),
+                      children: [
+                        SwitchListTile(
+                          title: const Text('New Chapter Reminders'),
+                          value: settings.pushNewChapterReminders,
+                          onChanged: (val) =>
+                              settings.setPushNewChapterReminders(val),
+                        ),
+                        SwitchListTile(
+                          title: const Text('Story Likes'),
+                          value: settings.pushStoryLikes,
+                          onChanged: (val) => settings.setPushStoryLikes(val),
+                        ),
+                        SwitchListTile(
+                          title: const Text('Comments'),
+                          value: settings.pushComments,
+                          onChanged: (val) => settings.setPushComments(val),
+                        ),
+                      ],
+                    ),
+
+                    // Language
                     ListTile(
-                      title: const Text("Font Size"),
-                      subtitle: Text(
-                        settings.fontSize == 0.8
-                            ? "Small"
-                            : settings.fontSize == 1.0
-                            ? "Medium"
-                            : "Large",
-                      ),
-                      trailing: DropdownButton<double>(
-                        value: settings.fontSize,
+                      title: const Text('Language'),
+                      trailing: DropdownButton<String>(
+                        value: settings.language,
                         items: const [
-                          DropdownMenuItem(value: 0.8, child: Text("Small")),
-                          DropdownMenuItem(value: 1.0, child: Text("Medium")),
-                          DropdownMenuItem(value: 1.2, child: Text("Large")),
+                          DropdownMenuItem(value: 'en', child: Text('English')),
+                          DropdownMenuItem(value: 'es', child: Text('Español')),
                         ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            settings.setFontSize(value);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Font size changed successfully"),
-                              ),
-                            );
-                          }
+                        onChanged: (val) {
+                          if (val != null) settings.setLanguage(val);
                         },
                       ),
                     ),
-                    // Account Settings
-                    ListTile(
-                      title: const Text("Account Settings"),
-                      subtitle: const Text("Manage your profile"),
-                      trailing: const Icon(Icons.arrow_forward_ios),
-                      onTap: () => _showAccountSettings(),
-                    ),
+
                     const Divider(),
-                    // Logout Button
+
+                    // --- Reader & Writer Specifics ---
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                      child: Text(
+                        'Reader & Writer',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+
+                    // Font Size Slider
+                    ListTile(
+                      title: const Text('Default Font Size'),
+                      subtitle: Text(
+                        settings.fontSize <= 0.85
+                            ? 'Small'
+                            : settings.fontSize <= 1.05
+                            ? 'Medium'
+                            : 'Large',
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
+                      subtitleTextStyle: const TextStyle(),
+                      trailing: SizedBox(
+                        width: 200,
+                        child: Slider(
+                          value: settings.fontSize,
+                          min: 0.8,
+                          max: 1.4,
+                          divisions: 6,
+                          label: '${(settings.fontSize * 100).round()}%',
+                          onChanged: (val) => settings.setFontSize(
+                            double.parse(val.toStringAsFixed(2)),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Reading Background
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: ReadingBackground.values.map((b) {
+                        return RadioListTile<ReadingBackground>(
+                          title: Text(
+                            b == ReadingBackground.white
+                                ? 'White'
+                                : b == ReadingBackground.sepia
+                                ? 'Sepia'
+                                : 'Pure Black',
+                          ),
+                          value: b,
+                          groupValue: settings.readingBackground,
+                          onChanged: (val) {
+                            if (val != null) settings.setReadingBackground(val);
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    // Auto-save drafts
+                    SwitchListTile(
+                      title: const Text('Auto-save Drafts'),
+                      value: settings.autoSaveDrafts,
+                      onChanged: (val) => settings.setAutoSaveDrafts(val),
+                    ),
+
+                    const Divider(),
+
+                    // --- AI Writing Assistant ---
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                      child: Text(
+                        'AI Writing Assistant',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Column(
+                      children: AiTone.values.map((t) {
+                        return RadioListTile<AiTone>(
+                          title: Text(
+                            t == AiTone.creative
+                                ? 'Creative'
+                                : t == AiTone.formal
+                                ? 'Formal'
+                                : 'Dramatic',
+                          ),
+                          value: t,
+                          groupValue: settings.aiTone,
+                          onChanged: (val) {
+                            if (val != null) settings.setAiTone(val);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    ListTile(
+                      title: const Text('AI Help Level'),
+                      trailing: DropdownButton<AiHelpLevel>(
+                        value: settings.aiHelpLevel,
+                        items: const [
+                          DropdownMenuItem(
+                            value: AiHelpLevel.full,
+                            child: Text('Full Suggestions'),
+                          ),
+                          DropdownMenuItem(
+                            value: AiHelpLevel.grammar,
+                            child: Text('Grammar Only'),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) settings.setAiHelpLevel(val);
+                        },
+                      ),
+                    ),
+
+                    const Divider(),
+
+                    // --- Support & Legal ---
+                    ListTile(
+                      title: const Text('Help Center / Contact Us'),
+                      subtitle: const Text('support@chaptr.example'),
+                      onTap: () => _showSupportDialog(
+                        'Contact Support',
+                        'Email: support@chaptr.example',
+                      ),
+                    ),
+                    ListTile(
+                      title: const Text('Privacy Policy'),
+                      onTap: () => _showSupportDialog(
+                        'Privacy Policy',
+                        'https://chaptr.example/privacy',
+                      ),
+                    ),
+                    ListTile(
+                      title: const Text('Terms of Service'),
+                      onTap: () => _showSupportDialog(
+                        'Terms of Service',
+                        'https://chaptr.example/terms',
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Text(
+                        'App Version v1.0.0',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+                    // Logout Button (prominent)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       child: ElevatedButton.icon(
@@ -486,7 +688,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       future: future,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: LogoLoading());
         }
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return Center(child: Text(emptyMessage));
@@ -501,7 +703,9 @@ class _ProfileScreenState extends State<ProfileScreen>
             final book = books[index];
             return Card(
               elevation: 0,
-              color: Colors.grey[50],
+              color: Theme.of(
+                context,
+              ).colorScheme.surface.withAlpha((0.05 * 255).round()),
               margin: const EdgeInsets.symmetric(vertical: 5),
               child: ListTile(
                 leading: book.coverUrl != null
@@ -572,7 +776,10 @@ class _ProfileScreenState extends State<ProfileScreen>
               Navigator.pop(context);
               _deleteBook(book.id.toString());
             },
-            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+            child: Text(
+              "Delete",
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -630,40 +837,125 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // Account Settings Dialog
-  void _showAccountSettings() {
+  // Change Email dialog
+  void _showChangeEmailDialog() {
+    final controller = TextEditingController(
+      text: _supabase.auth.currentUser?.email ?? '',
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Account Settings"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text("Edit Profile"),
-              onTap: () {
-                Navigator.pop(context);
-                _editProfile(null); // Pass null, will fetch in dialog
-              },
-            ),
-            ListTile(
-              title: const Text("Change Password"),
-              onTap: () {
-                Navigator.pop(context);
-                // Implement password change
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Password change not implemented yet"),
-                  ),
-                );
-              },
-            ),
-          ],
+        title: const Text('Change Email'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'New email'),
+          keyboardType: TextInputType.emailAddress,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Close"),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newEmail = controller.text.trim();
+              Navigator.pop(context);
+              await _changeEmail(newEmail);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _changeEmail(String newEmail) async {
+    try {
+      await _supabase.auth.updateUser(UserAttributes(email: newEmail));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Email updated')));
+      }
+    } catch (e) {
+      debugPrint('Failed to update email: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to update email')));
+      }
+    }
+  }
+
+  // Change Password dialog
+  void _showChangePasswordDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Change Password'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'New password'),
+          obscureText: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newPassword = controller.text;
+              Navigator.pop(context);
+              await _changePassword(newPassword);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _changePassword(String newPassword) async {
+    try {
+      await _supabase.auth.updateUser(UserAttributes(password: newPassword));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Password updated')));
+      }
+    } catch (e) {
+      debugPrint('Failed to update password: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update password')),
+        );
+      }
+    }
+  }
+
+  // Support & Legal dialog boilerplate (shows content and allows copy)
+  void _showSupportDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(content),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: content));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Copied to clipboard')),
+              );
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -694,7 +986,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                 );
               }
             },
-            child: const Text("Log Out", style: TextStyle(color: Colors.red)),
+            child: Text(
+              "Log Out",
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),

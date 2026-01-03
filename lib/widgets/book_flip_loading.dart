@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-class BookFlipLoading extends StatefulWidget {
-  const BookFlipLoading({super.key});
+class LogoLoading extends StatefulWidget {
+  const LogoLoading({super.key});
 
   @override
-  State<BookFlipLoading> createState() => _BookFlipLoadingState();
+  State<LogoLoading> createState() => _LogoLoadingState();
 }
 
-class _BookFlipLoadingState extends State<BookFlipLoading>
+class _LogoLoadingState extends State<LogoLoading>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _rotationAnimation;
@@ -34,18 +34,9 @@ class _BookFlipLoadingState extends State<BookFlipLoading>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _rotationAnimation,
-      builder: (context, child) {
-        return Transform.rotate(
-          angle: _rotationAnimation.value,
-          child: const Icon(
-            Icons.menu_book,
-            size: 50,
-            color: Color(0xFFFFEB3B),
-          ),
-        );
-      },
+    return RotationTransition(
+      turns: _rotationAnimation,
+      child: Image.asset('logo/chaptrLOGO.jpg', width: 100, height: 100),
     );
   }
 }

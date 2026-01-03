@@ -3,8 +3,6 @@ import 'auth_service.dart';
 import 'main_navigation.dart';
 import 'animations.dart';
 import 'widgets/book_flip_loading.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -126,7 +124,7 @@ class _AuthPageState extends State<AuthPage> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: _isLoading
-                ? const BookFlipLoading()
+                ? const LogoLoading()
                 : Card(
                     elevation: 10,
                     shape: RoundedRectangleBorder(
@@ -137,10 +135,10 @@ class _AuthPageState extends State<AuthPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.book,
-                            size: 80,
-                            color: Color(0xFFFFEB3B),
+                          Image.asset(
+                            'logo/chaptrLOGO.jpg',
+                            width: 80,
+                            height: 80,
                           ),
                           const SizedBox(height: 10),
                           Text(
@@ -200,7 +198,10 @@ class _AuthPageState extends State<AuthPage> {
                               _isLogin
                                   ? "Create an account"
                                   : "Have an account? Login",
-                              style: const TextStyle(color: Colors.black54),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface
+                                    .withAlpha((0.54 * 255).round()),
+                              ),
                             ),
                           ),
                           const SizedBox(height: 20),

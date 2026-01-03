@@ -11,8 +11,6 @@ class MockSupabaseClient extends Mock implements SupabaseClient {}
 
 class MockAuth extends Mock implements GoTrueClient {}
 
-class MockOAuthResponse extends Mock implements OAuthResponse {}
-
 class FakeFacebookPlatform extends FacebookAuthPlatform
     with MockPlatformInterfaceMixin {
   final LoginResult result;
@@ -105,10 +103,9 @@ void main() {
     // Return the mocked auth client
     when(() => mockSupabase.auth).thenReturn(mockAuth);
     // Stub the signInWithOAuth call to complete without error
-    final mockOAuthResp = MockOAuthResponse();
     when(
       () => mockAuth.signInWithOAuth(OAuthProvider.facebook),
-    ).thenAnswer((_) async => mockOAuthResp);
+    ).thenAnswer((_) async => true);
 
     final service = AuthService(mockSupabase);
 

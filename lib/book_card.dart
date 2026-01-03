@@ -11,7 +11,7 @@ class BookCard extends StatelessWidget {
       width: 150,
       margin: const EdgeInsets.only(right: 15),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12), // Round Corners per proposal
         boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
@@ -25,7 +25,9 @@ class BookCard extends StatelessWidget {
                 top: Radius.circular(12),
               ),
               child: Container(
-                color: Colors.grey[300],
+                color: Theme.of(
+                  context,
+                ).colorScheme.surface.withAlpha((0.3 * 255).round()),
                 child: const Icon(Icons.book, size: 50),
               ),
             ),
@@ -42,7 +44,12 @@ class BookCard extends StatelessWidget {
                 ),
                 Text(
                   book.authorName,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
+                  ),
                 ),
               ],
             ),

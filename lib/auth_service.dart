@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter/foundation.dart';
 
 class AuthService {
   final SupabaseClient _supabase;
@@ -67,21 +66,16 @@ class AuthService {
 
       if (supportsAuth) {
         googleUser = await GoogleSignIn.instance.authenticate();
-        print('[AuthService] authenticate() returned: ${googleUser?.email}');
+        print(
+          '[AuthService] authenticate() returned: ${googleUser?.email ?? 'none'}',
+        );
       } else {
         final lightweightUser = await GoogleSignIn.instance
             .attemptLightweightAuthentication();
         print(
-          '[AuthService] attemptLightweightAuthentication returned: ${lightweightUser?.email}',
+          '[AuthService] attemptLightweightAuthentication returned: ${lightweightUser?.email ?? 'none'}',
         );
-        if (lightweightUser != null) {
-          googleUser = lightweightUser;
-        } else {
-          googleUser = await GoogleSignIn.instance.authenticate();
-          print(
-            '[AuthService] fallback authenticate() returned: ${googleUser?.email}',
-          );
-        }
+        googleUser = lightweightUser;
       }
 
       if (googleUser == null) {
@@ -89,8 +83,7 @@ class AuthService {
         throw 'Google sign in cancelled';
       }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = googleUser.authentication;
       print(
         "[AuthService] googleAuth: idToken ${googleAuth.idToken != null ? 'present' : 'null'}",
       );

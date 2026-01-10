@@ -6,6 +6,7 @@ import 'add_book_screen.dart';
 import 'animations.dart';
 import 'widgets/book_flip_loading.dart';
 import 'widgets/pagination_widget.dart';
+import 'notifications_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,6 +18,35 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _libraryPage = 1;
   static const int _libraryItemsPerPage = 15;
+  int _unreadNotifications = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnreadNotifications();
+  }
+
+  Future<void> _loadUnreadNotifications() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final response = await Supabase.instance.client
+          .from('notifications')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('is_read', false)
+          .count();
+
+      if (mounted) {
+        setState(() {
+          _unreadNotifications = response.count ?? 0;
+        });
+      }
+    } catch (e) {
+      // Notifications table might not exist yet
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +63,49 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('My Library'),
         backgroundColor: const Color(0xFFFFEB3B),
         foregroundColor: Colors.black,
+        actions: [
+          // Notification bell
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const NotificationsScreen(),
+                    ),
+                  ).then((_) => _loadUnreadNotifications());
+                },
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _unreadNotifications > 9 ? '9+' : '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {

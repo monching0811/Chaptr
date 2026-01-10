@@ -5,6 +5,8 @@ class Comment {
   final String username;
   final String comment;
   final DateTime createdAt;
+  final String? parentCommentId; // For replies
+  final List<Comment> replies; // Nested replies
 
   Comment({
     required this.id,
@@ -13,6 +15,8 @@ class Comment {
     required this.username,
     required this.comment,
     required this.createdAt,
+    this.parentCommentId,
+    this.replies = const [],
   });
 
   factory Comment.fromMap(Map<String, dynamic> map) {
@@ -33,6 +37,10 @@ class Comment {
       createdAt: map['created_at'] is String 
           ? DateTime.parse(map['created_at'])
           : (map['created_at'] as DateTime? ?? DateTime.now()),
+      parentCommentId: map['parent_comment_id']?.toString(),
+      replies: map['replies'] != null 
+          ? (map['replies'] as List).map((r) => Comment.fromMap(r)).toList()
+          : [],
     );
   }
 }

@@ -26,6 +26,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   bool _incrementing = false;
   List<Comment> _comments = [];
   final TextEditingController _commentController = TextEditingController();
+  final Map<String, TextEditingController> _replyControllers = {};
+  final Map<String, bool> _replyingTo = {}; // Track which comment is being replied to
   bool _postingComment = false;
   bool _isFollowing = false;
   int _commentsPage = 1;
@@ -44,20 +46,43 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   Future<void> _fetchMetrics() async {
     try {
       final supabase = Supabase.instance.client;
-      final row = await supabase
+      
+      // Try to fetch from book_metrics table first
+      final metricsRow = await supabase
           .from('book_metrics')
           .select()
           .eq('book_id', widget.book.id)
           .maybeSingle();
 
-      if (row != null) {
+      if (metricsRow != null) {
         setState(() {
-          reads = (row['reads'] ?? reads) as int;
-          votes = (row['votes'] ?? votes) as int;
+          reads = (metricsRow['reads'] ?? reads) as int;
+          votes = (metricsRow['votes'] ?? votes) as int;
+        });
+        return;
+      }
+      
+      // If no metrics row, fetch from books table directly
+      final bookRow = await supabase
+          .from('books')
+          .select('reads, votes, author_id')
+          .eq('id', widget.book.id)
+          .maybeSingle();
+      
+      if (bookRow != null && mounted) {
+        setState(() {
+          reads = (bookRow['reads'] ?? widget.book.reads) as int;
+          votes = (bookRow['votes'] ?? widget.book.votes) as int;
+          // Update author_id if missing
+          if (widget.book.authorId == null && bookRow['author_id'] != null) {
+            // Recreate book with updated author_id
+            // Note: This is read-only, but ensures authorId is available for follow button
+          }
         });
       }
     } catch (e) {
-      // If the table doesn't exist or query fails, silently fallback to book values
+      debugPrint('Error fetching metrics: $e');
+      // Fallback to book values already set
     }
   }
 
@@ -107,17 +132,52 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   Future<void> _fetchComments() async {
     try {
       final supabase = Supabase.instance.client;
-      // Fetch comments with joined profiles for username
+      // Fetch all comments (including replies)
       final response = await supabase
           .from('comments')
-          .select('*, profiles(username)')
+          .select()
           .eq('book_id', widget.book.id)
           .order('created_at', ascending: false);
+      
       if (mounted) {
+        final allComments = (response as List)
+            .map((data) => Comment.fromMap(data))
+            .toList();
+        
+        // Separate parent comments and replies
+        final parentComments = allComments
+            .where((c) => c.parentCommentId == null)
+            .toList();
+        
+        // Group replies by parent comment ID
+        final repliesMap = <String, List<Comment>>{};
+        for (final comment in allComments) {
+          if (comment.parentCommentId != null) {
+            repliesMap.putIfAbsent(comment.parentCommentId!, () => []);
+            repliesMap[comment.parentCommentId]!.add(comment);
+            // Sort replies by date (oldest first for conversation flow)
+            repliesMap[comment.parentCommentId]!.sort((a, b) => 
+              a.createdAt.compareTo(b.createdAt));
+          }
+        }
+        
+        // Attach replies to parent comments
+        final commentsWithReplies = parentComments.map((parent) {
+          final replies = repliesMap[parent.id] ?? [];
+          return Comment(
+            id: parent.id,
+            bookId: parent.bookId,
+            userId: parent.userId,
+            username: parent.username,
+            comment: parent.comment,
+            createdAt: parent.createdAt,
+            parentCommentId: parent.parentCommentId,
+            replies: replies,
+          );
+        }).toList();
+        
         setState(() {
-          _comments = (response as List)
-              .map((data) => Comment.fromMap(data))
-              .toList();
+          _comments = commentsWithReplies;
         });
       }
     } catch (e) {
@@ -145,11 +205,28 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
 
       final username = profile?['username'] ?? user.email ?? 'Unknown User';
 
-      await supabase.from('comments').insert({
+      // Build insert payload - include username after SQL migration
+      final insertPayload = <String, dynamic>{
         'book_id': widget.book.id,
         'user_id': user.id,
         'comment': _commentController.text.trim(),
-      });
+        'username': username, // This will work after running the SQL migration
+      };
+
+      await supabase.from('comments').insert(insertPayload);
+
+      // Send notification to book author (if not commenting on own book)
+      final authorId = await _getBookAuthorId();
+      if (authorId != null && authorId != user.id) {
+        await _sendNotification(
+          type: 'comment',
+          recipientId: authorId,
+          bookId: widget.book.id,
+          message: '$username commented on "${widget.book.title}"',
+          fromUserId: user.id,
+          fromUsername: username,
+        );
+      }
 
       _commentController.clear();
       if (mounted) {
@@ -189,27 +266,52 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     }
   }
 
+  // Get book author_id from database if not in book object
+  Future<String?> _getBookAuthorId() async {
+    if (widget.book.authorId != null && widget.book.authorId!.isNotEmpty) {
+      return widget.book.authorId;
+    }
+    
+    try {
+      final supabase = Supabase.instance.client;
+      final bookRow = await supabase
+          .from('books')
+          .select('author_id')
+          .eq('id', widget.book.id)
+          .maybeSingle();
+      
+      return bookRow?['author_id']?.toString();
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<void> _checkFollow() async {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    if (user == null || widget.book.authorId == null) return;
+    if (user == null) return;
+    
+    final authorId = await _getBookAuthorId();
+    if (authorId == null || authorId.isEmpty) return;
+    
     final response = await supabase
         .from('follows')
         .select()
         .eq('follower_id', user.id)
-        .eq('following_id', widget.book.authorId!)
+        .eq('following_id', authorId)
         .maybeSingle();
-    setState(() => _isFollowing = response != null);
+    if (mounted) {
+      setState(() => _isFollowing = response != null);
+    }
   }
 
   Future<void> _toggleFollow() async {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    if (user == null ||
-        widget.book.authorId == null ||
-        widget.book.authorId!.isEmpty) {
-      return;
-    }
+    if (user == null) return;
+    
+    final authorId = await _getBookAuthorId();
+    if (authorId == null || authorId.isEmpty) return;
 
     try {
       if (_isFollowing) {
@@ -217,7 +319,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
             .from('follows')
             .delete()
             .eq('follower_id', user.id)
-            .eq('following_id', widget.book.authorId!);
+            .eq('following_id', authorId);
         if (mounted) {
           setState(() => _isFollowing = false);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -237,7 +339,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
       } else {
         await supabase.from('follows').insert({
           'follower_id': user.id,
-          'following_id': widget.book.authorId!,
+          'following_id': authorId,
         });
         if (mounted) {
           setState(() => _isFollowing = true);
@@ -290,6 +392,123 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(n >= 10000 ? 0 : 1)}K';
     return n.toString();
+  }
+
+  // Helper function to send notifications
+  Future<void> _sendNotification({
+    required String type,
+    required String? recipientId,
+    String? bookId,
+    String? commentId,
+    required String message,
+    required String? fromUserId,
+    required String fromUsername,
+  }) async {
+    if (recipientId == null || recipientId.isEmpty) return;
+    
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase.from('notifications').insert({
+        'user_id': recipientId, // Recipient
+        'type': type,
+        'book_id': bookId,
+        'comment_id': commentId,
+        'message': message,
+        'from_user_id': fromUserId,
+        'from_username': fromUsername,
+        'is_read': false,
+      });
+    } catch (e) {
+      debugPrint('Error sending notification: $e');
+      // Don't show error to user - notifications are best effort
+    }
+  }
+
+  // Post a reply to a comment
+  Future<void> _postReply(Comment parentComment) async {
+    final controller = _replyControllers[parentComment.id];
+    if (controller == null || controller.text.trim().isEmpty) return;
+    
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // Get username
+      final profile = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle();
+      final username = profile?['username'] ?? user.email ?? 'Unknown User';
+
+      // Insert reply
+      final replyPayload = <String, dynamic>{
+        'book_id': widget.book.id,
+        'user_id': user.id,
+        'comment': controller.text.trim(),
+        'username': username,
+        'parent_comment_id': parentComment.id, // Link to parent comment
+      };
+
+      await supabase.from('comments').insert(replyPayload);
+
+      // Send notification to parent comment author
+      if (parentComment.userId != user.id) {
+        await _sendNotification(
+          type: 'reply',
+          recipientId: parentComment.userId,
+          bookId: widget.book.id,
+          commentId: parentComment.id,
+          message: '$username replied to your comment',
+          fromUserId: user.id,
+          fromUsername: username,
+        );
+      }
+
+      controller.clear();
+      setState(() {
+        _replyingTo[parentComment.id] = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text("✓ Reply posted!"),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      _fetchComments();
+    } catch (e) {
+      debugPrint('Error posting reply: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to post reply: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    for (final controller in _replyControllers.values) {
+      controller.dispose();
+    }
+    _replyControllers.clear();
+    super.dispose();
   }
 
   @override
@@ -475,11 +694,45 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Follow Button
-                  if (widget.book.authorId != null &&
-                      widget.book.authorId!.isNotEmpty &&
-                      widget.book.authorId !=
-                          Supabase.instance.client.auth.currentUser?.id)
+                  // Follow Button - show for all books with author_id
+                  FutureBuilder<String?>(
+                    future: _getBookAuthorId(),
+                    builder: (context, snapshot) {
+                      final authorId = snapshot.data ?? widget.book.authorId;
+                      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+                      
+                      if (authorId != null && 
+                          authorId.isNotEmpty && 
+                          authorId != currentUserId) {
+                        return Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          child: ElevatedButton.icon(
+                            onPressed: _toggleFollow,
+                            icon: Icon(
+                              _isFollowing ? Icons.person_remove : Icons.person_add,
+                            ),
+                            label: Text(
+                              _isFollowing ? 'Unfollow Author' : 'Follow Author',
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isFollowing
+                                  ? Colors.grey
+                                  : const Color(0xFFFFEB3B),
+                              foregroundColor: _isFollowing
+                                  ? Colors.white
+                                  : Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                     Container(
                       width: double.infinity,
                       margin: const EdgeInsets.only(bottom: 16),
@@ -683,15 +936,162 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     const SizedBox(height: 8),
                     Text(comment.comment),
                     const SizedBox(height: 4),
-                    Text(
-                      _formatDate(comment.createdAt),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _formatDate(comment.createdAt),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              if (_replyingTo[comment.id] == true) {
+                                _replyingTo[comment.id] = false;
+                                _replyControllers[comment.id]?.dispose();
+                                _replyControllers.remove(comment.id);
+                              } else {
+                                _replyingTo[comment.id] = true;
+                                _replyControllers[comment.id] = TextEditingController();
+                              }
+                            });
+                          },
+                          icon: Icon(
+                            Icons.reply,
+                            size: 16,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          label: Text(
+                            _replyingTo[comment.id] == true ? 'Cancel' : 'Reply',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                    // Reply input field
+                    if (_replyingTo[comment.id] == true) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _replyControllers[comment.id],
+                              decoration: InputDecoration(
+                                hintText: 'Reply to ${comment.username}...',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                filled: true,
+                                fillColor: Theme.of(context).colorScheme.surface,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                              ),
+                              maxLines: 2,
+                              minLines: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: () => _postReply(comment),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFFEB3B),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                            ),
+                            child: const Text('Reply'),
+                          ),
+                        ],
+                      ),
+                    ],
+                    // Display replies
+                    if (comment.replies.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        margin: const EdgeInsets.only(left: 16),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Colors.grey[300]!,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: comment.replies.map((reply) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 12,
+                                        backgroundColor: const Color(0xFFFFEB3B).withAlpha((0.3 * 255).round()),
+                                        child: Text(
+                                          reply.username.isNotEmpty
+                                              ? reply.username[0].toUpperCase()
+                                              : '?',
+                                          style: const TextStyle(
+                                            color: Colors.black87,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        reply.username,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 32),
+                                    child: Text(
+                                      reply.comment,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 32, top: 4),
+                                    child: Text(
+                                      _formatDate(reply.createdAt),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withAlpha((0.5 * 255).round()),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

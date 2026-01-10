@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'book_model.dart';
@@ -6,6 +7,7 @@ import 'book_detail_screen.dart';
 import 'animations.dart';
 import 'widgets/book_flip_loading.dart';
 import 'widgets/pagination_widget.dart';
+import 'notifications_screen.dart';
 
 class BookstoreScreen extends StatefulWidget {
   const BookstoreScreen({super.key});
@@ -22,6 +24,29 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
   bool _loadingGenres = true;
   List<Book> _allBooks = [];
   bool _loadingBooks = true;
+  int _unreadNotifications = 0;
+
+  Future<void> _loadUnreadNotifications() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final response = await Supabase.instance.client
+          .from('notifications')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('is_read', false)
+          .count();
+
+      if (mounted) {
+        setState(() {
+          _unreadNotifications = response.count ?? 0;
+        });
+      }
+    } catch (e) {
+      // Notifications table might not exist yet
+    }
+  }
 
   Future<void> _loadGenresAndBooks() async {
     setState(() {
@@ -46,16 +71,33 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
       } else {
         final booksRes = await supabase.from('books').select('genre');
         final List<dynamic> booksList = booksRes as List<dynamic>? ?? [];
-        _genres = booksList
+        final genreSet = booksList
             .map((b) => (b['genre'] ?? '').toString())
             .where((s) => s.isNotEmpty)
-            .toSet()
-            .toList();
+            .toSet();
+
+        // Split comma-separated genres
+        final allGenres = <String>{};
+        for (final genreStr in genreSet) {
+          final splitGenres = genreStr
+              .split(',')
+              .map((g) => g.trim())
+              .where((g) => g.isNotEmpty);
+          allGenres.addAll(splitGenres);
+        }
+
+        _genres = allGenres.toList()..sort();
       }
     } catch (e) {
       _genres = [];
     } finally {
-      if (_genres.isEmpty) _genres = ['All'];
+      // Add "All" as first option, then list individual genres
+      if (_genres.isEmpty) {
+        _genres = ['All'];
+      } else {
+        // Ensure "All" is first, then individual genres
+        _genres = ['All', ..._genres.where((g) => g != 'All').toList()];
+      }
       setState(() => _loadingGenres = false);
     }
 
@@ -69,6 +111,7 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
       final List<dynamic> respData = response as List<dynamic>? ?? [];
       _allBooks = respData.map((data) => Book.fromMap(data)).toList();
     } catch (e) {
+      debugPrint('Error loading books: $e');
       _allBooks = [];
     } finally {
       setState(() => _loadingBooks = false);
@@ -83,9 +126,11 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
       if (genre == 'All' || genre.toLowerCase() == 'recommended') {
         return _allBooks;
       }
-      return _allBooks
-          .where((b) => b.genre.toLowerCase() == genre.toLowerCase())
-          .toList();
+      // Filter by genre - check if genre string contains the selected genre (comma-separated)
+      return _allBooks.where((b) {
+        final bookGenres = b.genres.map((g) => g.toLowerCase()).toList();
+        return bookGenres.contains(genre.toLowerCase());
+      }).toList();
     }
 
     // Apply search filtering across title, author, description
@@ -97,11 +142,15 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
       }).toList();
     }
 
+    // Filter by genre and search query
     return _allBooks.where((b) {
-      return b.genre.toLowerCase() == genre.toLowerCase() &&
-          (b.title.toLowerCase().contains(q) ||
-              b.authorName.toLowerCase().contains(q) ||
-              b.description.toLowerCase().contains(q));
+      final bookGenres = b.genres.map((g) => g.toLowerCase()).toList();
+      final matchesGenre = bookGenres.contains(genre.toLowerCase());
+      final matchesSearch =
+          b.title.toLowerCase().contains(q) ||
+          b.authorName.toLowerCase().contains(q) ||
+          b.description.toLowerCase().contains(q);
+      return matchesGenre && matchesSearch;
     }).toList();
   }
 
@@ -109,6 +158,7 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
   void initState() {
     super.initState();
     _loadGenresAndBooks();
+    _loadUnreadNotifications();
   }
 
   @override
@@ -129,6 +179,49 @@ class _BookstoreScreenState extends State<BookstoreScreen> {
         ),
         backgroundColor: const Color(0xFFFFEB3B),
         foregroundColor: Colors.black,
+        actions: [
+          // Notification bell
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const NotificationsScreen(),
+                    ),
+                  ).then((_) => _loadUnreadNotifications());
+                },
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _unreadNotifications > 9 ? '9+' : '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -382,7 +475,9 @@ class _GenreTabViewState extends State<_GenreTabView> {
                   return ListTile(
                     leading: Text('#$globalIndex'),
                     title: Text(book.title),
-                    subtitle: Text('${book.authorName} • ${book.reads} reads'),
+                    subtitle: Text(
+                      '${book.authorName} • ${book.reads} reads • ${book.votes} votes',
+                    ),
                     onTap: () => Navigator.push(
                       context,
                       createSlideRoute(BookDetailScreen(book: book)),

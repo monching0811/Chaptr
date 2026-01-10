@@ -12,6 +12,7 @@ import 'reader_screen.dart';
 import 'settings_provider.dart';
 import 'image_utils.dart';
 import 'widgets/book_flip_loading.dart';
+import 'notifications_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -25,11 +26,35 @@ class _ProfileScreenState extends State<ProfileScreen>
   final _supabase = Supabase.instance.client;
   late TabController _tabController;
   int _profileRefreshKey = 0;
+  int _unreadNotifications = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadUnreadNotifications();
+  }
+
+  Future<void> _loadUnreadNotifications() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final response = await _supabase
+          .from('notifications')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('is_read', false)
+          .count();
+
+      if (mounted) {
+        setState(() {
+          _unreadNotifications = response.count ?? 0;
+        });
+      }
+    } catch (e) {
+      // Notifications table might not exist yet
+    }
   }
 
   @override
@@ -282,6 +307,49 @@ class _ProfileScreenState extends State<ProfileScreen>
         title: const Text("My Profile"),
         backgroundColor: const Color(0xFFFFEB3B),
         foregroundColor: Colors.black,
+        actions: [
+          // Notification bell
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const NotificationsScreen(),
+                    ),
+                  ).then((_) => _loadUnreadNotifications());
+                },
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _unreadNotifications > 9 ? '9+' : '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

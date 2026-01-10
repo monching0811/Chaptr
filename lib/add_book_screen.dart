@@ -304,7 +304,12 @@ class _AddBookScreenState extends State<AddBookScreen> {
               'title': _chapterTitleControllers[e.key].text,
               'content': e.value.text,
               'is_done': _chapterDone[e.key],
-              'is_published': !isDraft && e.value.text.isNotEmpty,
+              // If published and has title/number, mark as published even without content
+              // This allows showing planned chapters
+              'is_published': !isDraft && (
+                e.value.text.isNotEmpty || 
+                _chapterTitleControllers[e.key].text.trim().isNotEmpty
+              ),
             },
           )
           .toList();

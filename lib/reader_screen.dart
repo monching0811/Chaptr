@@ -514,42 +514,99 @@ class _ReaderScreenState extends State<ReaderScreen> {
             ),
             const Divider(height: 30),
 
-            // --- FIXED: Iterate over published chapters only ---
+            // --- Iterate over published chapters, showing all planned chapters ---
             ..._publishedChapters.asMap().entries.map((entry) {
               int index = entry.key;
               var chapter = entry.value;
               int chNumber = chapter['chapter_number'] ?? 1;
               String title = chapter['title'] ?? '';
               String content = chapter['content'] ?? '';
+              final hasContent = content.trim().isNotEmpty;
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 25.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title.isNotEmpty ? title : "Chapter $chNumber",
-                      style: TextStyle(
-                        fontSize: effectiveFontSize + 2,
-                        fontWeight: FontWeight.bold,
-                        color: textColor.withAlpha((0.9 * 255).round()),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title.isNotEmpty ? title : "Chapter $chNumber",
+                            style: TextStyle(
+                              fontSize: effectiveFontSize + 2,
+                              fontWeight: FontWeight.bold,
+                              color: textColor.withAlpha((0.9 * 255).round()),
+                            ),
+                          ),
+                        ),
+                        if (!hasContent)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withAlpha((0.2 * 255).round()),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.orange,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              'Coming Soon',
+                              style: TextStyle(
+                                fontSize: effectiveFontSize - 4,
+                                color: Colors.orange[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 10),
-                    RichText(
-                      text: TextSpan(
-                        children: _buildTextSpans(
-                          content,
-                          chapterStarts[index],
+                    if (hasContent)
+                      RichText(
+                        text: TextSpan(
+                          children: _buildTextSpans(
+                            content,
+                            chapterStarts[index],
+                          ),
+                          style: TextStyle(
+                            fontSize: effectiveFontSize,
+                            height: 1.7,
+                            fontFamily: 'Serif',
+                            color: textColor,
+                          ),
                         ),
-                        style: TextStyle(
-                          fontSize: effectiveFontSize,
-                          height: 1.7,
-                          fontFamily: 'Serif',
-                          color: textColor,
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withAlpha((0.1 * 255).round()),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.schedule,
+                              color: Colors.grey[600],
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'This chapter is coming soon. The author is still working on it.',
+                              style: TextStyle(
+                                fontSize: effectiveFontSize - 2,
+                                fontStyle: FontStyle.italic,
+                                color: textColor.withAlpha((0.6 * 255).round()),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
                   ],
                 ),
               );

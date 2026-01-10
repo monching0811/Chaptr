@@ -10,7 +10,7 @@ import 'settings_provider.dart';
 class BookDetailScreen extends StatefulWidget {
   final Book book;
 
-  const BookDetailScreen({Key? key, required this.book}) : super(key: key);
+  const BookDetailScreen({super.key, required this.book});
 
   @override
   State<BookDetailScreen> createState() => _BookDetailScreenState();

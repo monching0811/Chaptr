@@ -3,7 +3,7 @@ class Book {
   final String title;
   final String authorName;
   final String? authorId;
-  final String genre;
+  final List<String> genres;
   final String description;
   final List<Map<String, dynamic>> chapters; // Changed to handle status
   final String? coverUrl;
@@ -16,7 +16,7 @@ class Book {
     required this.title,
     required this.authorName,
     this.authorId,
-    required this.genre,
+    required this.genres,
     required this.description,
     required this.chapters,
     this.coverUrl,
@@ -24,6 +24,8 @@ class Book {
     this.reads = 0,
     this.votes = 0,
   });
+
+  String get genre => genres.join(', ');
 
   factory Book.fromMap(Map<String, dynamic> map) {
     var rawChapters = map['chapters'];
@@ -52,10 +54,19 @@ class Book {
       return 0;
     }
 
+    // Parse genres
+    List<String> genresList = [];
+    var rawGenres = map['genres'] ?? map['genre'];
+    if (rawGenres is List) {
+      genresList = rawGenres.map((e) => e.toString()).toList();
+    } else if (rawGenres is String) {
+      genresList = [rawGenres];
+    }
+
     return Book(
       id: map['id'].toString(),
       title: map['title'] ?? 'Untitled',
-      genre: map['genre'] ?? 'Story',
+      genres: genresList,
       authorName: map['author_name'] ?? 'Unknown Author',
       description: map['description'] ?? '',
       chapters: chapterList,

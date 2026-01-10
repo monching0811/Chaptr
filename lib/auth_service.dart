@@ -67,7 +67,7 @@ class AuthService {
       if (supportsAuth) {
         googleUser = await GoogleSignIn.instance.authenticate();
         print(
-          '[AuthService] authenticate() returned: ${googleUser?.email ?? 'none'}',
+          '[AuthService] authenticate() returned: ${googleUser.email ?? 'none'}',
         );
       } else {
         final lightweightUser = await GoogleSignIn.instance

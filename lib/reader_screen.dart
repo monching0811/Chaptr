@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
+import 'dart:math';
 import 'book_model.dart';
 import 'settings_provider.dart';
 
@@ -30,6 +31,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double _speechRate = 0.5;
   double _pitch = 1.0;
 
+  int currentHighlightStart = -1;
+  int currentHighlightEnd = -1;
+  List<int> chapterStarts = [];
+
   // Helper to get only the chapters that are marked as published, sorted by chapter_number
   List<Map<String, dynamic>> get _publishedChapters {
     return widget.book.chapters
@@ -39,6 +44,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
         (a, b) =>
             (a['chapter_number'] ?? 0).compareTo(b['chapter_number'] ?? 0),
       );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    int offset = 0;
+    for (var ch in _publishedChapters) {
+      chapterStarts.add(offset);
+      String content = (ch['content'] ?? '').toString();
+      offset += content.length + 1;
+    }
   }
 
   @override
@@ -205,12 +221,32 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Future<void> _speak() async {
     if (_isPlaying) {
       await _flutterTts.stop();
-      if (mounted) setState(() => _isPlaying = false);
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          currentHighlightStart = -1;
+          currentHighlightEnd = -1;
+        });
+      }
     } else {
       if (mounted) setState(() => _isPlaying = true);
       await _flutterTts.setLanguage("en-US");
       await _flutterTts.setSpeechRate(_speechRate);
       await _flutterTts.setPitch(_pitch);
+
+      _flutterTts.setProgressHandler((
+        String text,
+        int start,
+        int end,
+        String word,
+      ) {
+        if (mounted) {
+          setState(() {
+            currentHighlightStart = start;
+            currentHighlightEnd = end;
+          });
+        }
+      });
 
       // Extract the 'content' string from each published chapter map (defensive)
       String fullContent = _publishedChapters
@@ -220,7 +256,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
       await _flutterTts.speak(fullContent);
 
       _flutterTts.setCompletionHandler(() {
-        if (mounted) setState(() => _isPlaying = false);
+        if (mounted) {
+          setState(() {
+            _isPlaying = false;
+            currentHighlightStart = -1;
+            currentHighlightEnd = -1;
+          });
+        }
       });
     }
   }
@@ -245,6 +287,33 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ).showSnackBar(const SnackBar(content: Text("Already in library.")));
       }
     }
+  }
+
+  List<TextSpan> _buildTextSpans(String text, int globalStart) {
+    List<TextSpan> spans = [];
+    int highlightStart = max(0, currentHighlightStart - globalStart);
+    int highlightEnd = min(text.length, currentHighlightEnd - globalStart);
+    if (highlightStart < 0) highlightStart = 0;
+    if (highlightEnd < 0) highlightEnd = 0;
+    if (highlightStart > text.length) highlightStart = text.length;
+    if (highlightEnd > text.length) highlightEnd = text.length;
+    if (highlightStart >= highlightEnd) {
+      spans.add(TextSpan(text: text));
+    } else {
+      if (highlightStart > 0) {
+        spans.add(TextSpan(text: text.substring(0, highlightStart)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(highlightStart, highlightEnd),
+          style: const TextStyle(backgroundColor: Colors.yellow),
+        ),
+      );
+      if (highlightEnd < text.length) {
+        spans.add(TextSpan(text: text.substring(highlightEnd)));
+      }
+    }
+    return spans;
   }
 
   @override
@@ -321,7 +390,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             const Divider(height: 30),
 
             // --- FIXED: Iterate over published chapters only ---
-            ..._publishedChapters.map((chapter) {
+            ..._publishedChapters.asMap().entries.map((entry) {
+              int index = entry.key;
+              var chapter = entry.value;
               int chNumber = chapter['chapter_number'] ?? 1;
               String title = chapter['title'] ?? '';
               String content = chapter['content'] ?? '';
@@ -340,19 +411,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Text(
-                      content,
-                      style: TextStyle(
-                        fontSize: effectiveFontSize,
-                        height: 1.7,
-                        fontFamily: 'Serif',
-                        color: textColor,
+                    RichText(
+                      text: TextSpan(
+                        children: _buildTextSpans(
+                          content,
+                          chapterStarts[index],
+                        ),
+                        style: TextStyle(
+                          fontSize: effectiveFontSize,
+                          height: 1.7,
+                          fontFamily: 'Serif',
+                          color: textColor,
+                        ),
                       ),
                     ),
                   ],
                 ),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),

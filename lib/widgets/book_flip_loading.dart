@@ -10,19 +10,19 @@ class LogoLoading extends StatefulWidget {
 class _LogoLoadingState extends State<LogoLoading>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _rotationAnimation;
+  late Animation<double> _flipAnimation;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(seconds: 2),
+      duration: const Duration(seconds: 1),
       vsync: this,
-    )..repeat();
+    )..repeat(reverse: true);
 
-    _rotationAnimation = Tween<double>(
+    _flipAnimation = Tween<double>(
       begin: 0.0,
-      end: 2 * 3.14159, // Full rotation
+      end: 3.14159, // 180 degrees for flip
     ).animate(_controller);
   }
 
@@ -34,9 +34,15 @@ class _LogoLoadingState extends State<LogoLoading>
 
   @override
   Widget build(BuildContext context) {
-    return RotationTransition(
-      turns: _rotationAnimation,
-      child: Image.asset('logo/chaptrLOGO.jpg', width: 100, height: 100),
+    return AnimatedBuilder(
+      animation: _flipAnimation,
+      builder: (context, child) {
+        return Transform(
+          transform: Matrix4.rotationY(_flipAnimation.value),
+          alignment: Alignment.center,
+          child: Image.asset('logo/chaptrLOGO.jpg', width: 100, height: 100),
+        );
+      },
     );
   }
 }

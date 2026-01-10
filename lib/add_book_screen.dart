@@ -64,11 +64,16 @@ class _AddBookScreenState extends State<AddBookScreen> {
 
   List<String> _selectedGenres = [];
   String? _genreError;
+  String? _selectedGenre; // For dropdown
+  bool _isOtherGenre = false; // For custom genre input
 
   // Load book data into the form (existing book editing)
   void _loadBookData() {
     _titleController.text = widget.book!.title;
-    _selectedGenres = List.from(widget.book!.genres);
+    // Load genres - filter out empty strings
+    _selectedGenres = widget.book!.genres
+        .where((g) => g.trim().isNotEmpty)
+        .toList();
     _descriptionController.text = widget.book!.description;
     _chapterCount = widget.book!.chapters.length;
     _chapterController.text = _chapterCount.toString();
@@ -129,11 +134,9 @@ class _AddBookScreenState extends State<AddBookScreen> {
       } catch (_) {}
       setState(() => _isLoadingGenres = false);
 
-      // If new book and nothing selected, pick first available
+      // If new book and nothing selected, don't auto-select
       setState(() {
-        if (_selectedGenres.isEmpty && _genres.isNotEmpty) {
-          _selectedGenres = [_genres.first];
-        }
+        // Don't auto-select genres - let user choose
       });
     }
   }
@@ -311,7 +314,8 @@ class _AddBookScreenState extends State<AddBookScreen> {
       debugPrint('Starting save');
 
       // 3. Insert or Update
-      String? coverUrl;
+      // Preserve existing cover URL if editing and no new image selected
+      String? coverUrl = widget.book?.coverUrl;
 
       // If there's a selected image, compress (again for safety) and upload it to storage.
       if (_selectedImage != null) {
@@ -357,8 +361,9 @@ class _AddBookScreenState extends State<AddBookScreen> {
         }
       }
 
-      // Validate genre selection
-      if (_selectedGenres.isEmpty) {
+      // Validate genre selection - filter out empty strings
+      final validGenres = _selectedGenres.where((g) => g.trim().isNotEmpty).toList();
+      if (validGenres.isEmpty) {
         if (mounted) {
           setState(() => _genreError = 'Please select at least one genre');
           ScaffoldMessenger.of(context).showSnackBar(
@@ -369,15 +374,20 @@ class _AddBookScreenState extends State<AddBookScreen> {
         return;
       }
 
+      // Convert genres list to a single string (database uses 'genre' column, not 'genres')
+      // Join multiple genres with comma and space
+      final genreString = validGenres.join(', ');
+
       final payload = {
         'title': title,
-        'genres': _selectedGenres,
+        'genre': genreString, // Use singular 'genre' to match database schema
         'description': _descriptionController.text,
         'chapters': chapterData,
         'author_id': user.id,
-        'author_name': user.email,
+        'author_name': user.email ?? user.userMetadata?['name'] ?? 'Unknown Author',
         'status': isDraft ? 'Draft' : 'Published',
-        if (coverUrl != null) 'cover_url': coverUrl,
+        // Always include cover_url - either new or existing
+        'cover_url': coverUrl ?? widget.book?.coverUrl,
       };
 
       debugPrint('Payload: $payload');
@@ -401,15 +411,29 @@ class _AddBookScreenState extends State<AddBookScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         debugPrint('UI updated after save');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(isDraft ? "Saved as Draft" : "Published!"),
-            backgroundColor: Colors.green,
-          ),
-        );
-        // Give the UI a brief moment to show the SnackBar before popping
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (mounted) Navigator.pop(context);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isDraft ? "✓ Saved as Draft successfully!" : "✓ Published successfully!",
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          // Give the UI a brief moment to show the SnackBar before popping
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (mounted) Navigator.pop(context);
+        }
       }
     } catch (e, st) {
       debugPrint("CATCHED ERROR: $e\n$st");
@@ -504,11 +528,26 @@ class _AddBookScreenState extends State<AddBookScreen> {
                                 fit: BoxFit.cover,
                               ),
                             )
-                          : Icon(
-                              Icons.add_a_photo,
-                              color: Theme.of(context).colorScheme.onSurface
-                                  .withAlpha((0.5 * 255).round()),
-                            ),
+                          : widget.book?.coverUrl != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    widget.book!.coverUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Icon(
+                                        Icons.add_a_photo,
+                                        color: Theme.of(context).colorScheme.onSurface
+                                            .withAlpha((0.5 * 255).round()),
+                                      );
+                                    },
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.add_a_photo,
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withAlpha((0.5 * 255).round()),
+                                ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -533,82 +572,98 @@ class _AddBookScreenState extends State<AddBookScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: _isLoadingGenres
-                            ? const SizedBox(
-                                height: 60,
-                                child: Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              )
-                            : DropdownButtonFormField<String>(
-                                initialValue:
-                                    _selectedGenre ??
-                                    (_genres.isNotEmpty
-                                        ? _genres.first
-                                        : _kGenres.first),
-                                decoration: InputDecoration(
-                                  labelText: "Genre",
-                                  border: OutlineInputBorder(),
-                                  errorText: _genreError,
-                                ),
-                                items:
-                                    [
-                                          // Use loaded genres, and ensure "Other" is an option
-                                          ...(_genres.isNotEmpty
-                                              ? _genres
-                                              : _kGenres),
-                                          'Other',
-                                        ]
-                                        .map(
-                                          (g) => DropdownMenuItem(
-                                            value: g,
-                                            child: Text(g),
-                                          ),
-                                        )
-                                        .toList(),
-                                onChanged: (val) {
-                                  setState(() {
-                                    _genreError = null;
-                                    _selectedGenre = val;
-                                    if (val == 'Other') {
-                                      _isOtherGenre = true;
-                                      // Keep any custom genre the user had typed
-                                    } else {
-                                      _isOtherGenre = false;
-                                      _genreController.text = '';
-                                    }
-                                  });
-                                },
-                              ),
-                      ),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        width: 80,
-                        child: TextField(
-                          controller: _chapterController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: "Chapters",
-                            border: OutlineInputBorder(),
+                        child: SizedBox(
+                          width: 80,
+                          child: TextField(
+                            controller: _chapterController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: "Chapters",
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (value) {
+                              final count = value.isEmpty
+                                  ? 0
+                                  : (int.tryParse(value) ?? 0);
+                              if (count >= 0 && count <= 100) {
+                                _updateChapterCount(count);
+                              } else {
+                                // Reset to valid value if invalid
+                                _chapterController.text = _chapterCount
+                                    .toString();
+                              }
+                            },
                           ),
-                          onChanged: (value) {
-                            final count = value.isEmpty
-                                ? 0
-                                : (int.tryParse(value) ?? 0);
-                            if (count >= 0 && count <= 100) {
-                              _updateChapterCount(count);
-                            } else {
-                              // Reset to valid value if invalid
-                              _chapterController.text = _chapterCount
-                                  .toString();
-                            }
-                          },
                         ),
                       ),
                     ],
                   ),
 
                   // If user chose "Other", show an autocomplete text field to type the custom genre
+                  if (_isOtherGenre) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _genreController,
+                      decoration: const InputDecoration(
+                        labelText: "Custom Genre",
+                        border: OutlineInputBorder(),
+                        hintText: "Enter a custom genre",
+                      ),
+                      onChanged: (value) {
+                        if (value.trim().isNotEmpty && !_selectedGenres.contains(value.trim())) {
+                          setState(() {
+                            _selectedGenres = [value.trim()];
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                  // Multi-genre selection chips
+                  const SizedBox(height: 10),
+                  if (!_isLoadingGenres && _genres.isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Select Genres (Multiple):",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _genres.map((genre) {
+                            final isSelected = _selectedGenres.contains(genre);
+                            return FilterChip(
+                              label: Text(genre),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                setState(() {
+                                  if (selected) {
+                                    if (!_selectedGenres.contains(genre)) {
+                                      _selectedGenres.add(genre);
+                                    }
+                                  } else {
+                                    _selectedGenres.remove(genre);
+                                  }
+                                  _genreError = null;
+                                });
+                              },
+                              selectedColor: const Color(0xFFFFEB3B),
+                              checkmarkColor: Colors.black,
+                            );
+                          }).toList(),
+                        ),
+                        if (_genreError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                              _genreError!,
+                              style: const TextStyle(color: Colors.red, fontSize: 12),
+                            ),
+                          ),
+                      ],
+                    ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _descriptionController,

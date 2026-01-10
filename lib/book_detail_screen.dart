@@ -6,6 +6,7 @@ import 'comment_model.dart';
 import 'reader_screen.dart';
 import 'animations.dart';
 import 'settings_provider.dart';
+import 'widgets/pagination_widget.dart';
 
 class BookDetailScreen extends StatefulWidget {
   final Book book;
@@ -27,6 +28,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
   bool _postingComment = false;
   bool _isFollowing = false;
+  int _commentsPage = 1;
+  static const int _commentsPerPage = 10;
 
   @override
   void initState() {
@@ -102,17 +105,24 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   }
 
   Future<void> _fetchComments() async {
-    final supabase = Supabase.instance.client;
-    final response = await supabase
-        .from('comments')
-        .select()
-        .eq('book_id', widget.book.id)
-        .order('created_at', ascending: false);
-    setState(() {
-      _comments = (response as List)
-          .map((data) => Comment.fromMap(data))
-          .toList();
-    });
+    try {
+      final supabase = Supabase.instance.client;
+      // Fetch comments with joined profiles for username
+      final response = await supabase
+          .from('comments')
+          .select('*, profiles(username)')
+          .eq('book_id', widget.book.id)
+          .order('created_at', ascending: false);
+      if (mounted) {
+        setState(() {
+          _comments = (response as List)
+              .map((data) => Comment.fromMap(data))
+              .toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching comments: $e');
+    }
   }
 
   Future<void> _postComment() async {
@@ -120,15 +130,63 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     setState(() => _postingComment = true);
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    if (user == null) return;
-    await supabase.from('comments').insert({
-      'book_id': widget.book.id,
-      'user_id': user.id,
-      'comment': _commentController.text.trim(),
-    });
-    _commentController.clear();
-    setState(() => _postingComment = false);
-    _fetchComments();
+    if (user == null) {
+      setState(() => _postingComment = false);
+      return;
+    }
+
+    try {
+      // Get username from profile
+      final profile = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final username = profile?['username'] ?? user.email ?? 'Unknown User';
+
+      await supabase.from('comments').insert({
+        'book_id': widget.book.id,
+        'user_id': user.id,
+        'comment': _commentController.text.trim(),
+      });
+
+      _commentController.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text("✓ Comment posted successfully!"),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      _fetchComments();
+      // Reset to first page after posting new comment
+      setState(() {
+        _commentsPage = 1;
+      });
+    } catch (e) {
+      debugPrint('Error posting comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to post comment: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _postingComment = false);
+      }
+    }
   }
 
   Future<void> _checkFollow() async {
@@ -147,20 +205,69 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   Future<void> _toggleFollow() async {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    if (user == null || widget.book.authorId == null) return;
-    if (_isFollowing) {
-      await supabase
-          .from('follows')
-          .delete()
-          .eq('follower_id', user.id)
-          .eq('following_id', widget.book.authorId!);
-      setState(() => _isFollowing = false);
-    } else {
-      await supabase.from('follows').insert({
-        'follower_id': user.id,
-        'following_id': widget.book.authorId!,
-      });
-      setState(() => _isFollowing = true);
+    if (user == null ||
+        widget.book.authorId == null ||
+        widget.book.authorId!.isEmpty) {
+      return;
+    }
+
+    try {
+      if (_isFollowing) {
+        await supabase
+            .from('follows')
+            .delete()
+            .eq('follower_id', user.id)
+            .eq('following_id', widget.book.authorId!);
+        if (mounted) {
+          setState(() => _isFollowing = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.person_remove, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text("Unfollowed author"),
+                ],
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        await supabase.from('follows').insert({
+          'follower_id': user.id,
+          'following_id': widget.book.authorId!,
+        });
+        if (mounted) {
+          setState(() => _isFollowing = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.person_add, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text("✓ Following author!"),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error toggling follow: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to ${_isFollowing ? "unfollow" : "follow"}: $e',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -469,91 +576,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                           ],
                         ),
                         const SizedBox(height: 16),
-                        // Comments List
-                        _comments.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Text(
-                                    'No comments yet. Be the first to share your thoughts!',
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withAlpha((0.6 * 255).round()),
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              )
-                            : ListView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: _comments.length,
-                                itemBuilder: (context, index) {
-                                  final comment = _comments[index];
-                                  return Card(
-                                    margin: const EdgeInsets.symmetric(
-                                      vertical: 4,
-                                    ),
-                                    elevation: 0,
-                                    color: Theme.of(context).colorScheme.surface
-                                        .withAlpha((0.1 * 255).round()),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              CircleAvatar(
-                                                radius: 16,
-                                                backgroundColor: const Color(
-                                                  0xFFFFEB3B,
-                                                ),
-                                                child: Text(
-                                                  comment.username.isNotEmpty
-                                                      ? comment.username[0]
-                                                            .toUpperCase()
-                                                      : '?',
-                                                  style: const TextStyle(
-                                                    color: Colors.black,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                comment.username,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(comment.comment),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            _formatDate(comment.createdAt),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface
-                                                  .withAlpha(
-                                                    (0.6 * 255).round(),
-                                                  ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                        // Comments List with Pagination
+                        _buildCommentsList(),
                       ],
                     ),
                   ),
@@ -563,6 +587,133 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCommentsList() {
+    if (_comments.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'No comments yet. Be the first to share your thoughts!',
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
+              fontStyle: FontStyle.italic,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    final totalPages = (_comments.length / _commentsPerPage).ceil();
+    final startIndex = (_commentsPage - 1) * _commentsPerPage;
+    final endIndex = (startIndex + _commentsPerPage).clamp(0, _comments.length);
+    final paginatedComments = _comments.sublist(startIndex, endIndex);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Comments count and page info
+        if (_comments.length > _commentsPerPage)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${_comments.length} ${_comments.length == 1 ? 'comment' : 'comments'}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  'Showing ${startIndex + 1}-${endIndex} of ${_comments.length}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+
+        // Paginated comments list
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: paginatedComments.length,
+          itemBuilder: (context, index) {
+            final comment = paginatedComments[index];
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              elevation: 0,
+              color: Theme.of(
+                context,
+              ).colorScheme.surface.withAlpha((0.1 * 255).round()),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: const Color(0xFFFFEB3B),
+                          child: Text(
+                            comment.username.isNotEmpty
+                                ? comment.username[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          comment.username,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(comment.comment),
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatDate(comment.createdAt),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withAlpha((0.6 * 255).round()),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+
+        // Pagination widget for comments
+        if (totalPages > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 16.0),
+            child: PaginationWidget(
+              currentPage: _commentsPage,
+              totalPages: totalPages,
+              onPageChanged: (page) {
+                setState(() {
+                  _commentsPage = page;
+                });
+              },
+            ),
+          ),
+      ],
     );
   }
 

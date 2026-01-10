@@ -34,6 +34,78 @@ class _ReaderScreenState extends State<ReaderScreen> {
   int currentHighlightStart = -1;
   int currentHighlightEnd = -1;
   List<int> chapterStarts = [];
+  
+  // Reading progress tracking
+  ScrollController? _scrollController;
+  double _readingProgress = 0.0;
+  
+  // Save reading progress periodically
+  Future<void> _saveReadingProgress() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    
+    try {
+      // Calculate progress percentage based on scroll position
+      if (_scrollController != null && _scrollController!.hasClients) {
+        final maxScroll = _scrollController!.position.maxScrollExtent;
+        final currentScroll = _scrollController!.offset;
+        if (maxScroll > 0) {
+          _readingProgress = (currentScroll / maxScroll * 100).clamp(0.0, 100.0);
+        }
+      }
+      
+      // Get total content length
+      final totalLength = _publishedChapters
+          .map((ch) => (ch['content'] ?? '').toString().length)
+          .fold<int>(0, (sum, length) => sum + length);
+      
+      // Save to database
+      await Supabase.instance.client.from('reading_progress').upsert({
+        'user_id': user.id,
+        'book_id': widget.book.id,
+        'progress_percentage': _readingProgress,
+        'last_read_at': DateTime.now().toIso8601String(),
+        'total_length': totalLength,
+      });
+    } catch (e) {
+      debugPrint('Error saving reading progress: $e');
+    }
+  }
+  
+  // Load reading progress
+  Future<void> _loadReadingProgress() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    
+    try {
+      final response = await Supabase.instance.client
+          .from('reading_progress')
+          .select()
+          .eq('user_id', user.id)
+          .eq('book_id', widget.book.id)
+          .maybeSingle();
+      
+      if (response != null && mounted) {
+        setState(() {
+          _readingProgress = (response['progress_percentage'] ?? 0.0).toDouble();
+        });
+        
+        // Scroll to saved position if available
+        if (_scrollController != null && 
+            _scrollController!.hasClients && 
+            _readingProgress > 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController != null && _scrollController!.hasClients) {
+              final maxScroll = _scrollController!.position.maxScrollExtent;
+              _scrollController!.jumpTo(maxScroll * (_readingProgress / 100));
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading reading progress: $e');
+    }
+  }
 
   // Helper to get only the chapters that are marked as published, sorted by chapter_number
   List<Map<String, dynamic>> get _publishedChapters {
@@ -49,17 +121,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void initState() {
     super.initState();
+    _scrollController = ScrollController();
+    _scrollController!.addListener(() {
+      // Save progress periodically while scrolling
+      _saveReadingProgress();
+    });
+    
     int offset = 0;
     for (var ch in _publishedChapters) {
       chapterStarts.add(offset);
       String content = (ch['content'] ?? '').toString();
       offset += content.length + 1;
     }
+    
+    // Load saved progress
+    _loadReadingProgress();
   }
 
   @override
   void dispose() {
     _flutterTts.stop();
+    // Save progress one last time
+    _saveReadingProgress();
+    _scrollController?.dispose();
     super.dispose();
   }
 
@@ -291,27 +375,42 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   List<TextSpan> _buildTextSpans(String text, int globalStart) {
     List<TextSpan> spans = [];
-    int highlightStart = max(0, currentHighlightStart - globalStart);
-    int highlightEnd = min(text.length, currentHighlightEnd - globalStart);
-    if (highlightStart < 0) highlightStart = 0;
-    if (highlightEnd < 0) highlightEnd = 0;
-    if (highlightStart > text.length) highlightStart = text.length;
-    if (highlightEnd > text.length) highlightEnd = text.length;
-    if (highlightStart >= highlightEnd) {
-      spans.add(TextSpan(text: text));
+    
+    // If TTS is playing and we have highlight positions
+    if (_isPlaying && currentHighlightStart >= 0 && currentHighlightEnd > currentHighlightStart) {
+      int highlightStart = max(0, currentHighlightStart - globalStart);
+      int highlightEnd = min(text.length, currentHighlightEnd - globalStart);
+      if (highlightStart < 0) highlightStart = 0;
+      if (highlightEnd < 0) highlightEnd = 0;
+      if (highlightStart > text.length) highlightStart = text.length;
+      if (highlightEnd > text.length) highlightEnd = text.length;
+      
+      if (highlightStart >= highlightEnd || highlightStart >= text.length) {
+        spans.add(TextSpan(text: text));
+      } else {
+        // Before highlight
+        if (highlightStart > 0) {
+          spans.add(TextSpan(text: text.substring(0, highlightStart)));
+        }
+        // Highlighted text (current word being read)
+        spans.add(
+          TextSpan(
+            text: text.substring(highlightStart, highlightEnd),
+            style: TextStyle(
+              backgroundColor: const Color(0xFFFFEB3B),
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+        );
+        // After highlight
+        if (highlightEnd < text.length) {
+          spans.add(TextSpan(text: text.substring(highlightEnd)));
+        }
+      }
     } else {
-      if (highlightStart > 0) {
-        spans.add(TextSpan(text: text.substring(0, highlightStart)));
-      }
-      spans.add(
-        TextSpan(
-          text: text.substring(highlightStart, highlightEnd),
-          style: const TextStyle(backgroundColor: Colors.yellow),
-        ),
-      );
-      if (highlightEnd < text.length) {
-        spans.add(TextSpan(text: text.substring(highlightEnd)));
-      }
+      // No highlighting when TTS is not playing
+      spans.add(TextSpan(text: text));
     }
     return spans;
   }
@@ -348,7 +447,22 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return Scaffold(
       backgroundColor: background,
       appBar: AppBar(
-        title: Text(widget.book.title),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.book.title,
+              style: const TextStyle(fontSize: 16),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (_readingProgress > 0)
+              Text(
+                '${_readingProgress.toStringAsFixed(0)}% read',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+              ),
+          ],
+        ),
         backgroundColor: const Color(0xFFFFEB3B),
         foregroundColor: Colors.black,
         actions: [
@@ -365,8 +479,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
             onPressed: _saveToLibrary,
           ),
         ],
+        bottom: _readingProgress > 0
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(4),
+                child: LinearProgressIndicator(
+                  value: _readingProgress / 100,
+                  backgroundColor: Colors.grey[300],
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.black87),
+                ),
+              )
+            : null,
       ),
       body: SingleChildScrollView(
+        controller: _scrollController,
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -62,26 +62,13 @@ class _AddBookScreenState extends State<AddBookScreen> {
   List<String> _genres = [];
   bool _isLoadingGenres = true;
 
-  String? _selectedGenre;
-  bool _isOtherGenre = false;
+  List<String> _selectedGenres = [];
   String? _genreError;
 
   // Load book data into the form (existing book editing)
   void _loadBookData() {
     _titleController.text = widget.book!.title;
-    final bookGenre = widget.book!.genre;
-
-    // Tentatively pick selection from fallback list -- _fetchGenres will reconcile once backend list is loaded
-    if (_kGenres.contains(bookGenre)) {
-      _selectedGenre = bookGenre;
-      _isOtherGenre = false;
-      _genreController.text = '';
-    } else {
-      _selectedGenre = 'Other';
-      _isOtherGenre = true;
-      _genreController.text = bookGenre;
-    }
-
+    _selectedGenres = List.from(widget.book!.genres);
     _descriptionController.text = widget.book!.description;
     _chapterCount = widget.book!.chapters.length;
     _chapterController.text = _chapterCount.toString();
@@ -142,30 +129,12 @@ class _AddBookScreenState extends State<AddBookScreen> {
       } catch (_) {}
       setState(() => _isLoadingGenres = false);
 
-      // If editing an existing book, reconcile selection against the loaded genres
-      if (widget.book != null) {
-        final bookGenre = widget.book!.genre;
-        if (_genres.contains(bookGenre)) {
-          setState(() {
-            _selectedGenre = bookGenre;
-            _isOtherGenre = false;
-            _genreController.text = '';
-          });
-        } else {
-          setState(() {
-            _selectedGenre = 'Other';
-            _isOtherGenre = true;
-            _genreController.text = bookGenre;
-          });
+      // If new book and nothing selected, pick first available
+      setState(() {
+        if (_selectedGenres.isEmpty && _genres.isNotEmpty) {
+          _selectedGenres = [_genres.first];
         }
-      } else {
-        // If new book and nothing selected, pick first available
-        setState(() {
-          _selectedGenre ??= (_genres.isNotEmpty
-              ? _genres.first
-              : _kGenres.first);
-        });
-      }
+      });
     }
   }
 
@@ -206,9 +175,9 @@ class _AddBookScreenState extends State<AddBookScreen> {
         _fetchGenres();
         // Auto-select the new genre if it was successfully stored
         setState(() {
-          _selectedGenre = g;
-          _isOtherGenre = false;
-          _genreController.text = '';
+          if (!_selectedGenres.contains(g)) {
+            _selectedGenres.add(g);
+          }
         });
       }
     } catch (e) {
@@ -389,36 +358,20 @@ class _AddBookScreenState extends State<AddBookScreen> {
       }
 
       // Validate genre selection
-      String chosenGenre;
-      if (_isOtherGenre) {
-        if (_genreController.text.trim().isEmpty) {
-          if (mounted) {
-            setState(() => _genreError = 'Please enter a genre');
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Please enter a custom genre')),
-            );
-          }
-          setState(() => _isLoading = false);
-          return;
+      if (_selectedGenres.isEmpty) {
+        if (mounted) {
+          setState(() => _genreError = 'Please select at least one genre');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please select at least one genre')),
+          );
         }
-        chosenGenre = _genreController.text.trim();
-      } else {
-        if (_selectedGenre == null || _selectedGenre!.isEmpty) {
-          if (mounted) {
-            setState(() => _genreError = 'Please select a genre');
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Please select a genre')),
-            );
-          }
-          setState(() => _isLoading = false);
-          return;
-        }
-        chosenGenre = _selectedGenre!;
+        setState(() => _isLoading = false);
+        return;
       }
 
       final payload = {
         'title': title,
-        'genre': chosenGenre,
+        'genres': _selectedGenres,
         'description': _descriptionController.text,
         'chapters': chapterData,
         'author_id': user.id,
@@ -448,16 +401,15 @@ class _AddBookScreenState extends State<AddBookScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         debugPrint('UI updated after save');
-        // Temporarily commented out to test if causing crash
-        // ScaffoldMessenger.of(context).showSnackBar(
-        //   SnackBar(
-        //     content: Text(isDraft ? "Saved as Draft" : "Published!"),
-        //     backgroundColor: Colors.green,
-        //   ),
-        // );
-        // // Give the UI a brief moment to show the SnackBar before popping
-        // await Future.delayed(const Duration(milliseconds: 200));
-        // if (mounted) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isDraft ? "Saved as Draft" : "Published!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Give the UI a brief moment to show the SnackBar before popping
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (mounted) Navigator.pop(context);
       }
     } catch (e, st) {
       debugPrint("CATCHED ERROR: $e\n$st");
@@ -657,80 +609,6 @@ class _AddBookScreenState extends State<AddBookScreen> {
                   ),
 
                   // If user chose "Other", show an autocomplete text field to type the custom genre
-                  if (_isOtherGenre) ...[
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Autocomplete<String>(
-                                initialValue: TextEditingValue(
-                                  text: _genreController.text,
-                                ),
-                                optionsBuilder:
-                                    (TextEditingValue textEditingValue) {
-                                      final source = _genres.isNotEmpty
-                                          ? _genres
-                                          : _kGenres;
-                                      if (textEditingValue.text.isEmpty) {
-                                        return const Iterable<String>.empty();
-                                      }
-                                      return source.where(
-                                        (g) => g.toLowerCase().contains(
-                                          textEditingValue.text.toLowerCase(),
-                                        ),
-                                      );
-                                    },
-                                fieldViewBuilder:
-                                    (
-                                      context,
-                                      controller,
-                                      focusNode,
-                                      onFieldSubmitted,
-                                    ) {
-                                      controller.text = _genreController.text;
-                                      return TextField(
-                                        controller: controller,
-                                        focusNode: focusNode,
-                                        decoration: const InputDecoration(
-                                          labelText: "Custom Genre",
-                                          border: OutlineInputBorder(),
-                                          hintText: "e.g., Literary Fiction",
-                                        ),
-                                        onChanged: (v) =>
-                                            _genreController.text = v,
-                                      );
-                                    },
-                                onSelected: (selection) =>
-                                    _genreController.text = selection,
-                              ),
-                              if (_genreError != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 6.0),
-                                  child: Text(
-                                    _genreError!,
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.error,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.send),
-                          tooltip: 'Suggest genre',
-                          onPressed: () => _suggestGenre(_genreController.text),
-                        ),
-                      ],
-                    ),
-                  ],
                   const SizedBox(height: 10),
                   TextField(
                     controller: _descriptionController,

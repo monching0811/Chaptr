@@ -57,25 +57,23 @@ class _ChaptrAppState extends State<ChaptrApp> {
       if (session != null) {
         // Ensure a profile row exists for the signed-in user (handles OAuth providers)
         final user = session.user;
-        if (user != null) {
-          try {
-            final existing = await supabase
-                .from('profiles')
-                .select()
-                .eq('id', user.id)
-                .maybeSingle();
+        try {
+          final existing = await supabase
+              .from('profiles')
+              .select()
+              .eq('id', user.id)
+              .maybeSingle();
 
-            if (existing == null) {
-              final username = user.email ?? (user.userMetadata?['name'] ?? '');
-              await supabase.from('profiles').insert({
-                'id': user.id,
-                'username': username,
-              });
-              print('[Main] Created profile for ${user.id}');
-            }
-          } catch (e) {
-            print('[Main] Error ensuring profile exists: $e');
+          if (existing == null) {
+            final username = user.email ?? (user.userMetadata?['name'] ?? '');
+            await supabase.from('profiles').insert({
+              'id': user.id,
+              'username': username,
+            });
+            print('[Main] Created profile for ${user.id}');
           }
+        } catch (e) {
+          print('[Main] Error ensuring profile exists: $e');
         }
 
         // User signed in — navigate to main app

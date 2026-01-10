@@ -1,10 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:gotrue/gotrue.dart';
 import 'package:chaptr_ebook_app/auth_service.dart';
 import 'package:flutter_facebook_auth_platform_interface/flutter_facebook_auth_platform_interface.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockSupabaseClient extends Mock implements SupabaseClient {}

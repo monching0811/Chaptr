@@ -16,13 +16,23 @@ class Comment {
   });
 
   factory Comment.fromMap(Map<String, dynamic> map) {
+    // Handle both joined profile and direct username field
+    String username = 'Anonymous';
+    if (map['profiles'] != null && map['profiles'] is Map) {
+      username = map['profiles']?['username'] ?? 'Anonymous';
+    } else if (map['username'] != null) {
+      username = map['username'].toString();
+    }
+    
     return Comment(
       id: map['id'].toString(),
       bookId: map['book_id'].toString(),
       userId: map['user_id'].toString(),
-      username: map['profiles']?['username'] ?? 'Anonymous',
+      username: username,
       comment: map['comment'] ?? '',
-      createdAt: DateTime.parse(map['created_at']),
+      createdAt: map['created_at'] is String 
+          ? DateTime.parse(map['created_at'])
+          : (map['created_at'] as DateTime? ?? DateTime.now()),
     );
   }
 }

@@ -58,9 +58,21 @@ class Book {
     List<String> genresList = [];
     var rawGenres = map['genres'] ?? map['genre'];
     if (rawGenres is List) {
-      genresList = rawGenres.map((e) => e.toString()).toList();
+      genresList = rawGenres
+          .map((e) => e.toString())
+          .where((g) => g.trim().isNotEmpty)
+          .toList();
     } else if (rawGenres is String) {
-      genresList = [rawGenres];
+      // Split comma-separated genres and filter empty strings
+      genresList = rawGenres
+          .split(',')
+          .map((g) => g.trim())
+          .where((g) => g.isNotEmpty)
+          .toList();
+      // If splitting resulted in empty list, keep the original as single item
+      if (genresList.isEmpty && rawGenres.trim().isNotEmpty) {
+        genresList = [rawGenres.trim()];
+      }
     }
 
     return Book(
@@ -68,6 +80,7 @@ class Book {
       title: map['title'] ?? 'Untitled',
       genres: genresList,
       authorName: map['author_name'] ?? 'Unknown Author',
+      authorId: map['author_id']?.toString(),
       description: map['description'] ?? '',
       chapters: chapterList,
       coverUrl: map['cover_url'],
